@@ -1,0 +1,44 @@
+[build-system]
+requires = ["hatchling>=1.25"]
+build-backend = "hatchling.build"
+[project]
+name = "cloudbyte-tracer"
+version = "0.1.0"
+description = "CloudByte agent observability tracing"
+readme = "README.md"
+requires-python = ">=3.10"
+license = "Apache-2.0"
+authors = [{ name = "CloudByte" }]
+keywords = ["cloudbyte", "tracing", "observability", "ai-agents", "llm", "opentelemetry", "openinference"]
+classifiers = [
+    "Development Status :: 4 - Beta",
+    "Intended Audience :: Developers",
+    "Operating System :: OS Independent",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3 :: Only",
+    "Programming Language :: Python :: 3.10",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Programming Language :: Python :: 3.13",
+    "Programming Language :: Python :: 3.14",
+    "Topic :: System :: Monitoring",
+]
+[project.urls]
+Homepage = "https://github.com/CloudByte-AI/cloudbyte_tracer"
+Documentation = "https://github.com/CloudByte-AI/cloudbyte_tracer/tree/main/docs"
+Source = "https://github.com/CloudByte-AI/cloudbyte_tracer"
+Issues = "https://github.com/CloudByte-AI/cloudbyte_tracer/issues"
+Changelog = "https://github.com/CloudByte-AI/cloudbyte_tracer/releases"
+[project.optional-dependencies]
+openai = ["opentelemetry-sdk>=1.45,<2", "openinference-instrumentation>=0.1.83,<0.2", "openinference-instrumentation-openai>=0.1.77,<0.2"]
+anthropic = ["opentelemetry-sdk>=1.45,<2", "openinference-instrumentation>=0.1.83,<0.2", "openinference-instrumentation-anthropic>=3.3.9,<4"]
+langchain = ["opentelemetry-sdk>=1.45,<2", "openinference-instrumentation>=0.1.83,<0.2", "openinference-instrumentation-langchain>=0.1.90,<0.2"]
+all = ["opentelemetry-sdk>=1.45,<2", "openinference-instrumentation>=0.1.83,<0.2", "openinference-instrumentation-openai>=0.1.77,<0.2", "openinference-instrumentation-anthropic>=3.3.9,<4", "openinference-instrumentation-langchain>=0.1.90,<0.2"]
+test = ["pytest>=8", "pytest-asyncio", "httpx", "openai", "anthropic", "langgraph", "langchain-openai", "build"]
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+asyncio_mode = "auto"
+asyncio_default_fixture_loop_scope = "function"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/cloudbyte_tracer"]

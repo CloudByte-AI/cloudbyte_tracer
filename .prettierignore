@@ -1,0 +1,8 @@
+node_modules/
+dist/
+artifacts/
+.venv*/
+python/
+*.md
+package-lock.json
+contract/*.json

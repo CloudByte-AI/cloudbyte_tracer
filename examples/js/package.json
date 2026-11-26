@@ -1,0 +1,19 @@
+{
+  "name": "cloudbyte-tracer-examples",
+  "private": true,
+  "type": "module",
+  "dependencies": {
+    "cloudbyte-tracer": "file:../../js",
+    "@opentelemetry/api": "^1.9.0",
+    "@opentelemetry/sdk-trace-base": "^2.0.0",
+    "@opentelemetry/context-async-hooks": "^2.0.0",
+    "@arizeai/openinference-instrumentation-openai": "^4.7.1",
+    "@arizeai/openinference-instrumentation-anthropic": "^1.0.6",
+    "@arizeai/openinference-instrumentation-langchain": "^4.2.4",
+    "openai": "^7.64.0",
+    "@anthropic-ai/sdk": "^1.14.0",
+    "@langchain/langgraph": "^1.7.5",
+    "@langchain/core": "^1.5.1",
+    "@langchain/openai": "^1.8.5"
+  }
+}

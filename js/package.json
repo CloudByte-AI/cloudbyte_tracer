@@ -1,0 +1,109 @@
+{
+  "name": "cloudbyte-tracer",
+  "version": "0.1.0",
+  "description": "CloudByte agent observability tracing",
+  "license": "Apache-2.0",
+  "keywords": [
+    "cloudbyte",
+    "tracing",
+    "observability",
+    "ai-agents",
+    "llm",
+    "opentelemetry",
+    "openinference"
+  ],
+  "homepage": "https://github.com/CloudByte-AI/cloudbyte_tracer#readme",
+  "bugs": {
+    "url": "https://github.com/CloudByte-AI/cloudbyte_tracer/issues"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/CloudByte-AI/cloudbyte_tracer.git",
+    "directory": "js"
+  },
+  "type": "module",
+  "engines": {
+    "node": ">=20"
+  },
+  "main": "./dist/index.cjs",
+  "module": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "import": {
+        "types": "./dist/index.d.ts",
+        "default": "./dist/index.js"
+      },
+      "require": {
+        "types": "./dist/index.d.cts",
+        "default": "./dist/index.cjs"
+      }
+    }
+  },
+  "files": [
+    "dist",
+    "README.md",
+    "LICENSE"
+  ],
+  "scripts": {
+    "build": "tsup",
+    "typecheck": "tsc --noEmit",
+    "test": "tsx --test test/*.test.ts",
+    "format": "prettier --write . ../examples/js \"../contract/*.{mjs,cjs}\" \"../scripts/*.mjs\" --ignore-path ../.prettierignore",
+    "format:check": "prettier --check . ../examples/js \"../contract/*.{mjs,cjs}\" \"../scripts/*.mjs\" --ignore-path ../.prettierignore",
+    "lint": "eslint ."
+  },
+  "peerDependencies": {
+    "@arizeai/openinference-instrumentation-anthropic": "^1.0.6",
+    "@arizeai/openinference-instrumentation-langchain": "^4.2.4",
+    "@arizeai/openinference-instrumentation-openai": "^4.7.1",
+    "@opentelemetry/api": "^1.9.0",
+    "@opentelemetry/context-async-hooks": "^2.0.0",
+    "@opentelemetry/sdk-trace-base": "^2.0.0"
+  },
+  "peerDependenciesMeta": {
+    "@opentelemetry/api": {
+      "optional": true
+    },
+    "@opentelemetry/sdk-trace-base": {
+      "optional": true
+    },
+    "@opentelemetry/context-async-hooks": {
+      "optional": true
+    },
+    "@arizeai/openinference-instrumentation-openai": {
+      "optional": true
+    },
+    "@arizeai/openinference-instrumentation-anthropic": {
+      "optional": true
+    },
+    "@arizeai/openinference-instrumentation-langchain": {
+      "optional": true
+    }
+  },
+  "devDependencies": {
+    "@anthropic-ai/sdk": "^1.14.0",
+    "@arizeai/openinference-instrumentation-anthropic": "^1.0.6",
+    "@arizeai/openinference-instrumentation-langchain": "^4.2.4",
+    "@arizeai/openinference-instrumentation-openai": "^4.7.1",
+    "@eslint/js": "^10.0.1",
+    "@langchain/core": "^1.5.1",
+    "@langchain/langgraph": "^1.7.5",
+    "@langchain/openai": "^1.8.5",
+    "@opentelemetry/api": "^1.9.0",
+    "@opentelemetry/context-async-hooks": "^2.0.0",
+    "@opentelemetry/sdk-trace-base": "^2.0.0",
+    "@types/node": "^22.0.0",
+    "eslint": "^10.15.0",
+    "globals": "^17.14.0",
+    "openai": "^7.64.0",
+    "prettier": "^3.10.1",
+    "tsup": "^8.0.0",
+    "tsx": "^4.0.0",
+    "typescript": "^5.7.0",
+    "typescript-eslint": "^8.74.0"
+  },
+  "overrides": {
+    "esbuild": "^0.28.2"
+  }
+}

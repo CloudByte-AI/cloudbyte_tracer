@@ -1,0 +1,129 @@
+name: Release
+
+# Pushing a version tag (v0.1.0) builds, tests and publishes both packages.
+# Each publish waits for a release manager to approve its GitHub environment (pypi, npm);
+# npm releases are staged and an npm owner approves them on npmjs.com with two-factor login.
+# A manual run only builds and tests, unless "rehearse on TestPyPI" is ticked.
+# No step uses a stored token: PyPI and npm trust this workflow through OIDC (trusted publishing).
+on:
+  push:
+    tags: ['v*']
+  workflow_dispatch:
+    inputs:
+      rehearse_testpypi:
+        description: 'Also upload the Python package to TestPyPI (needs the testpypi environment and pending publisher)'
+        type: boolean
+        default: false
+
+permissions:
+  contents: read
+
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.14'
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+      - name: Verify lockstep versions (and the tag, on a tag push)
+        run: python scripts/check-version.py "$RELEASE_TAG"
+        env:
+          RELEASE_TAG: ${{ github.ref_type == 'tag' && github.ref_name || '' }}
+      - run: python -m pip install -e './python[all,test]'
+      - run: python -m pytest python/tests -q
+      - run: npm ci --ignore-scripts
+        working-directory: js
+      - run: npm run typecheck && npm test && npm run build
+        working-directory: js
+      - run: python -m build python --outdir artifacts/python
+      - run: npm pack --pack-destination ../artifacts
+        working-directory: js
+      - name: Install the built packages into clean environments and run the examples
+        run: |
+          python scripts/install-python.py --wheel artifacts/python/*.whl
+          node scripts/install-js.mjs artifacts/*.tgz
+      - uses: actions/upload-artifact@v4
+        with:
+          name: release-packages
+          if-no-files-found: error
+          path: |
+            artifacts/python/*
+            artifacts/*.tgz
+
+  testpypi:
+    needs: build
+    if: github.event_name == 'workflow_dispatch' && inputs.rehearse_testpypi
+    runs-on: ubuntu-latest
+    environment: testpypi
+    permissions:
+      id-token: write
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          name: release-packages
+          path: artifacts
+      - uses: pypa/gh-action-pypi-publish@release/v1
+        with:
+          repository-url: https://test.pypi.org/legacy/
+          packages-dir: artifacts/python/
+
+  pypi:
+    needs: build
+    if: github.event_name == 'push' && github.ref_type == 'tag'
+    runs-on: ubuntu-latest
+    environment: pypi
+    permissions:
+      id-token: write
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          name: release-packages
+          path: artifacts
+      - uses: pypa/gh-action-pypi-publish@release/v1
+        with:
+          packages-dir: artifacts/python/
+
+  npm:
+    needs: build
+    if: github.event_name == 'push' && github.ref_type == 'tag'
+    runs-on: ubuntu-latest
+    environment: npm
+    permissions:
+      id-token: write
+    steps:
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+      # Trusted publishing needs npm 11.5.1+, staged publishing 11.15.0+.
+      - run: npm install -g 'npm@^11.15.0'
+      - uses: actions/download-artifact@v4
+        with:
+          name: release-packages
+          path: artifacts
+      # Stages the release: an npm owner approves it on npmjs.com (Staged Packages) with two-factor login.
+      # Provenance is added automatically for a public package published from a public repository.
+      - run: npm stage publish artifacts/*.tgz --access public
+
+  github-release:
+    needs: [pypi, npm]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          name: release-packages
+          path: artifacts
+      - run: gh release create "$RELEASE_TAG" artifacts/python/* artifacts/*.tgz --verify-tag --generate-notes
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+          RELEASE_TAG: ${{ github.ref_name }}
