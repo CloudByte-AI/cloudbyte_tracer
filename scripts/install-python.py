@@ -1,7 +1,9 @@
 """Install a built wheel in a clean venv and run all mocked examples."""
-import argparse,json,os,subprocess,sys,venv
+import argparse,json,os,re,subprocess,sys,venv
 from pathlib import Path
 root=Path(__file__).resolve().parents[1]
+# The version this checkout builds, so the check follows every release instead of naming one.
+expected_version=re.search(r'^version = "([^"]+)"',(root/"python/pyproject.toml").read_text(),re.M)[1]
 parser=argparse.ArgumentParser();parser.add_argument("--wheel",required=True);parser.add_argument("--name",default="");args=parser.parse_args()
 wheel=Path(args.wheel).resolve()
 folder=root/"artifacts"/("install-python-"+str(sys.version_info.major)+str(sys.version_info.minor)+args.name)
@@ -10,7 +12,7 @@ venv.EnvBuilder(with_pip=True).create(folder)
 python=folder/("Scripts/python.exe" if os.name=="nt" else "bin/python")
 def run(*args,**kwargs): subprocess.run([str(python),*map(str,args)],check=True,**kwargs)
 run("-m","pip","install",wheel)
-run("-c","import importlib.metadata as m; import cloudbyte_tracer as c; assert c.__version__ == '0.1.0'; assert all('extra ==' in r or 'extra == ' in r for r in (m.requires('cloudbyte-tracer') or [])); print('Wheel core import: zero required dependencies')",cwd=folder)
+run("-c","import importlib.metadata as m; import cloudbyte_tracer as c; assert c.__version__ == "+repr(expected_version)+", c.__version__; assert all('extra ==' in r or 'extra == ' in r for r in (m.requires('cloudbyte-tracer') or [])); print('Wheel core import: zero required dependencies')",cwd=folder)
 env={k:v for k,v in os.environ.items() if not k.startswith("CLOUDBYTE_")};env["CLOUDBYTE_DISABLED"]="true"
 run(root/"examples/python/manual.py",env=env,cwd=folder)
 run("-m","pip","install",str(wheel)+"[all]","openai","anthropic","langgraph","httpx")

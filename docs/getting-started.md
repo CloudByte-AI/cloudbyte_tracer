@@ -1,8 +1,8 @@
 # Getting started
 
-Install a wheel or tarball from your team's artifact store: pip install ./cloudbyte_tracer-0.1.0-py3-none-any.whl or npm install ./cloudbyte-tracer-0.1.0.tgz. No registry is required; public/private distribution is undecided.
+Install from PyPI or npm: `pip install cloudbyte-tracer` or `npm install cloudbyte-tracer`. Python 3.10+ or Node.js 20+.
 
-Create an agent in CloudByte Agent Observability. Store its key in CLOUDBYTE_AGENT_KEY through your secret manager, and set CLOUDBYTE_BASE_URL to the server origin. For local development that can be http://localhost:4242. Do not append /v1/agent-spans. init() reads these variables.
+Create an agent in CloudByte Agent Observability. Store its key in CLOUDBYTE_AGENT_KEY through your secret manager. The SDKs send to https://api.cloudbyte.ai by default; set CLOUDBYTE_BASE_URL only for another server origin, for example http://localhost:4242 in local development. Do not append /v1/agent-spans. init() reads these variables. The agent's page in CloudByte shows the same steps with copyable commands.
 
 Use the README's manual example. One root creates one run; nested spans are steps. Call shutdown before a short process exits. Node serverless handlers must await flush before returning. See auto-capture.md for optional dependencies.
 

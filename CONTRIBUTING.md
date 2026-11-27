@@ -1,6 +1,6 @@
 # Development
 
-Use Python 3.10+ and Node 20+. Create/activate a venv, then pip install -e './python[all,test]'. Run python -m pytest python/tests -q. In js/, npm ci --ignore-scripts, npm run format:check, npm run lint, npm run typecheck, npm test and npm run build.
+Use Python 3.10+ and Node 20+. Create/activate a venv, then pip install -e './python[all]' -r python/requirements-test.txt (the test tools are a requirements file, not a package extra, so they are not listed on PyPI). Run python -m pytest python/tests -q. In js/, npm ci --ignore-scripts, npm run format:check, npm run lint, npm run typecheck, npm test and npm run build.
 
 JS formatting is Prettier (config in .prettierrc.json at the repo root; run npm run format in js/ to apply it to the SDK, tests, examples and JS scripts). Linting is ESLint with typescript-eslint (js/eslint.config.js). The SDK never throws into the host app, so empty catch blocks are allowed. Avoid any in the core; it is allowed only in src/otel/ and tests, where code talks to optional OpenTelemetry/OpenInference peers whose types the core must not import. Any other any needs a disable comment that says why. CI fails on unformatted or lint-failing code. Build Python with python -m build python --outdir artifacts/python; in js/ run npm pack --pack-destination ../artifacts.
 

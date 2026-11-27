@@ -20,6 +20,10 @@ Python timeouts are seconds; Node timeouts are milliseconds. Python flush(timeou
 
 Queue: 10,000 copies or 8,000,000 encoded bytes, dropping oldest with one warning. Oversized single copies are dropped without evicting useful copies. Batches contain at most 500 copies and 4,000,000 encoded bytes. Objects are serialized when enqueued, preserving snapshots.
 
+Send order (0.1.1 and later): a root span's end copy, which closes its run, is sent ahead of everything else queued; the rest go in arrival order. When the queue overflows, ordinary copies are dropped before root end copies. So if a flush or shutdown deadline cuts sending short, the run still shows as finished, with the steps that did not get through missing, rather than staying "running".
+
+Batch jobs: a process that creates many steps and then exits should give sending enough time before it ends: `flush(timeout=60)` in Python, `await flush(60000)` in Node, then shutdown. The defaults (5 seconds) suit interactive agents. How long sending takes depends on the server and the network to it; allow roughly a second per few hundred steps.
+
 Attributes are flat scalar values and trimmed to 32,768 bytes by dropping largest entries first. Names/models: 200 Unicode code points. Error messages: 4,096 code points. Non-negative integer token counts clamp to 2,147,483,647; invalid counts are omitted. The backend also limits runs to 2,000 spans and enforces retention.
 
 ## Truncation compatibility decision

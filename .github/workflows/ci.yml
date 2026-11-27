@@ -14,10 +14,11 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: ${{ matrix.python }}
-      - run: python -m pip install -e './python[all,test]'
+      - run: python -m pip install -e './python[all]' -r python/requirements-test.txt
       - run: python -m pytest python/tests -q
       - run: python -m build python --outdir artifacts/python
-      - run: python scripts/install-python.py --wheel artifacts/python/cloudbyte_tracer-0.1.0-py3-none-any.whl
+      # Globs, not version numbers, so a version bump cannot break CI.
+      - run: python scripts/install-python.py --wheel artifacts/python/*.whl
       - uses: actions/upload-artifact@v4
         if: matrix.python == '3.14'
         with:
@@ -46,7 +47,7 @@ jobs:
       - run: npm test
       - run: npm run build
       - run: mkdir -p ../artifacts && npm pack --pack-destination ../artifacts
-      - run: node ../scripts/install-js.mjs ../artifacts/cloudbyte-tracer-0.1.0.tgz
+      - run: node ../scripts/install-js.mjs ../artifacts/cloudbyte-tracer-*.tgz
       - uses: actions/upload-artifact@v4
         if: matrix.node == 24
         with:

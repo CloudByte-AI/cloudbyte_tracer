@@ -2,9 +2,14 @@
 
 Optional capture uses OpenInference's maintained instrumentations and the core's existing queue. There are no handwritten provider adapters or OTLP endpoint.
 
-Python: install a local wheel extra, for example pip install './cloudbyte_tracer-0.1.0-py3-none-any.whl[openai]'. Extras: openai, anthropic, langchain, all. Install the provider/framework client your app uses. Then init(auto_capture=["openai", "anthropic", "langchain"]). true enables installed integrations. Named missing integrations warn. Sync/async completions and consumed streams are tested; consume/close streams so spans finish.
+Python: install an extra, for example `pip install "cloudbyte-tracer[openai]"`. Extras: openai, anthropic, langchain, all. Install the provider/framework client your app uses. Then init(auto_capture=["openai", "anthropic", "langchain"]). true enables installed integrations. Named missing integrations warn. Sync/async completions and consumed streams are tested; consume/close streams so spans finish.
 
-Node: install @opentelemetry/api, @opentelemetry/sdk-trace-base, @opentelemetry/context-async-hooks and the selected @arizeai/openinference-instrumentation-openai, -anthropic or -langchain optional peers alongside your tarball and provider clients.
+Node: install @opentelemetry/api, @opentelemetry/sdk-trace-base, @opentelemetry/context-async-hooks and the selected @arizeai/openinference-instrumentation-openai, -anthropic or -langchain optional peers alongside cloudbyte-tracer and your provider clients, for example:
+
+~~~sh
+npm install cloudbyte-tracer @opentelemetry/api @opentelemetry/sdk-trace-base \
+  @opentelemetry/context-async-hooks @arizeai/openinference-instrumentation-openai
+~~~
 
 ESM may load different instances from require. Explicitly pass the modules your application uses:
 

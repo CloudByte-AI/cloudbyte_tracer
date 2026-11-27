@@ -12,7 +12,17 @@ export const retryAfter = (header: string | null): number =>
   header !== null && /^\d+$/.test(header.trim())
     ? Math.min(Number(header.trim()), 60) * 1000
     : 5000;
+/**
+ * The copy that closes a run: a root span (no parent) that has ended. Sent ahead of everything else queued, so
+ * a run is marked finished even when a deadline cuts sending short. The server merges copies by span_id and never
+ * lets a copy that has not ended change a span that has (it only fills missing fields), so a start copy arriving
+ * after its end copy changes nothing.
+ */
+const isRootEnd = (span: WireSpan) => span.parent_span_id == null && span.ended_at != null;
 export class Transport {
+  // Two lanes: root end copies, sent first, and everything else in arrival order. The queue limits apply to
+  // both together; `bytes` counts both.
+  private priority: string[] = [];
   private queue: string[] = [];
   private bytes = 0;
   private timer?: ReturnType<typeof setTimeout>;
@@ -39,19 +49,30 @@ export class Transport {
       return;
     }
     while (
-      this.queue.length &&
-      (this.queue.length >= this.maxQueueSpans || this.bytes + size > this.maxQueueBytes)
+      this.queued() &&
+      (this.queued() >= this.maxQueueSpans || this.bytes + size > this.maxQueueBytes)
     ) {
-      this.bytes -= Buffer.byteLength(this.queue.shift()!);
+      // Oldest ordinary copies go first; a root end copy only when nothing else is left to drop.
+      const lane = this.queue.length ? this.queue : this.priority;
+      this.bytes -= Buffer.byteLength(lane.shift()!);
       this.warnOverflow();
     }
-    this.queue.push(encoded);
+    (isRootEnd(span) ? this.priority : this.queue).push(encoded);
     this.bytes += size;
-    if (this.queue.length >= this.maxBatch) {
+    if (this.queued() >= this.maxBatch) {
       void this.drain();
       return;
     }
     this.schedule();
+  }
+  /** Copies waiting in both lanes. */
+  private queued() {
+    return this.priority.length + this.queue.length;
+  }
+  private dropQueued() {
+    this.priority = [];
+    this.queue = [];
+    this.bytes = 0;
   }
   private warnOverflow() {
     if (!this.warned) {
@@ -60,7 +81,7 @@ export class Transport {
     }
   }
   private schedule() {
-    if (!this.timer && !this.sending && this.queue.length && !this.stopped) {
+    if (!this.timer && !this.sending && this.queued() && !this.stopped) {
       this.timer = setTimeout(() => {
         this.timer = undefined;
         void this.drain();
@@ -75,15 +96,17 @@ export class Transport {
       this.timer = undefined;
     }
     this.sending = (async () => {
-      while (this.queue.length && !this.stopped && !this.disabled) {
+      while (this.queued() && !this.stopped && !this.disabled) {
+        // Root end copies first, then the rest in arrival order.
         const batch: string[] = [];
         let bytes = 12;
-        while (this.queue.length && batch.length < this.maxBatch) {
-          const item = this.queue[0],
+        while (this.queued() && batch.length < this.maxBatch) {
+          const lane = this.priority.length ? this.priority : this.queue;
+          const item = lane[0],
             size = Buffer.byteLength(item) + 1;
           if (batch.length && bytes + size > this.maxBodyBytes) break;
           bytes += size;
-          batch.push(this.queue.shift()!);
+          batch.push(lane.shift()!);
           this.bytes -= size - 1;
         }
         await this.send('{"spans":[' + batch.join(',') + ']}');
@@ -118,8 +141,7 @@ export class Transport {
         });
         if (response.status === 401 || response.status === 403) {
           this.disabled = true;
-          this.queue = [];
-          this.bytes = 0;
+          this.dropQueued();
           log('HTTP ' + response.status + ': access denied; not sending further spans');
           await response.body?.cancel();
           return;
@@ -177,7 +199,6 @@ export class Transport {
     if (this.retryTimer) clearTimeout(this.retryTimer);
     this.wakeRetry?.();
     this.abort?.abort();
-    this.queue = [];
-    this.bytes = 0;
+    this.dropQueued();
   }
 }

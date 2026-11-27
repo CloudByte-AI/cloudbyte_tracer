@@ -6,6 +6,8 @@ No runs: check key, base URL, module/agent enabled state and CLOUDBYTE_DISABLED.
 
 Missing final steps: consume/close streams, exit Python context managers, await Node callbacks and flush before serverless returns. Children appear when finished; roots send a start copy. Hard termination cannot flush memory.
 
+A run finished but some steps are missing (or, before 0.1.1, a run stayed "running"): the process exited before everything queued was sent. Give a batch job more time before it exits, for example `flush(timeout=60)` / `await flush(60000)`; see configuration.md, "Batch jobs". To tell that this happened: in Python, stderr shows "cloudbyte_tracer: flush timed out with N span(s) still unsent"; in Node, `await flush(...)` returns `false` (and with `debug: true` stderr shows "cloudbyte_tracer: flush timed out"). Check the return value in a Node batch job before exiting.
+
 Missing auto spans: install selected optional integrations and provider clients, initialise before requests, and pass explicit modules with Node ESM. Competing patchers are skipped. A second auto-capture owner falls back to manual tracing with a warning.
 
 Graph parenting changed after an upgrade: use supported versions and rerun prototype tests. Callback framework context requires the bridge; an isolated provider alone is insufficient.

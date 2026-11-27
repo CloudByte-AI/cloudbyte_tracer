@@ -11,6 +11,10 @@ const root = resolve(dirname(fileURLToPath(import.meta.url)), '..'),
     'artifacts',
     'install-js-' + process.versions.node.split('.')[0] + (process.argv[3] ?? ''),
   );
+// The version this checkout builds, so the check follows every release instead of naming one.
+const expected = JSON.stringify(
+  JSON.parse(readFileSync(join(root, 'js', 'package.json'), 'utf8')).version,
+);
 mkdirSync(dir);
 writeFileSync(join(dir, 'package.json'), JSON.stringify({ private: true, type: 'module' }));
 const npm = 'npm';
@@ -37,11 +41,11 @@ run(npm, ['install', '--ignore-scripts', '--omit=optional', tarball]);
 run(process.execPath, [
   '--input-type=module',
   '-e',
-  "import {Tracer,version} from 'cloudbyte-tracer'; if(version!=='0.1.0') throw Error(version); const t=new Tracer({disabled:true}); t.withSpan('core',{},()=>42); await t.shutdown(); console.log('ESM core import passed')",
+  `import {Tracer,version} from 'cloudbyte-tracer'; if(version!==${expected}) throw Error(version); const t=new Tracer({disabled:true}); t.withSpan('core',{},()=>42); await t.shutdown(); console.log('ESM core import passed')`,
 ]);
 run(process.execPath, [
   '-e',
-  "const {Tracer,version}=require('cloudbyte-tracer'); if(version!=='0.1.0') throw Error(version); const t=new Tracer({disabled:true}); t.withSpan('core',{},()=>42); t.shutdown().then(()=>console.log('CJS core import passed'))",
+  `const {Tracer,version}=require('cloudbyte-tracer'); if(version!==${expected}) throw Error(version); const t=new Tracer({disabled:true}); t.withSpan('core',{},()=>42); t.shutdown().then(()=>console.log('CJS core import passed'))`,
 ]);
 cpSync(join(root, 'examples/js'), join(dir, 'examples'), {
   recursive: true,

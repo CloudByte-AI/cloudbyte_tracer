@@ -1,0 +1,10 @@
+# Test and build tools for developing this package. Not a package extra, so it is not listed on PyPI.
+# Install with: pip install -e './python[all]' -r python/requirements-test.txt
+pytest>=8
+pytest-asyncio
+httpx
+openai
+anthropic
+langgraph
+langchain-openai
+build

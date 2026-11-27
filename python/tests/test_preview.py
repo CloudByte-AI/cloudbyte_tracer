@@ -107,6 +107,11 @@ class FakeServer:
         return begun[0]
 
 
+def queued_copies(tracer):
+    """The copies waiting to be sent, in send order: root end copies first, then the rest in arrival order."""
+    return list(tracer._priority) + list(tracer._queue)
+
+
 def wait_for(condition, timeout=5.0):
     deadline = time.monotonic() + timeout
     while time.monotonic() < deadline:
@@ -479,7 +484,7 @@ class SendingTests(TracerTestCase):
         tracer.flush()
         self.assertEqual(len(self.server.requests), 1)
         self.assertEqual(len(self.server.spans()), 2)
-        self.assertEqual(len(tracer._queue), 0)
+        self.assertEqual(queued_copies(tracer), [])
         self.assertEqual(tracer._queue_bytes, 0)
         self.assertEqual(tracer._processed, tracer._enqueued)
         self.assertEqual(self.stderr.getvalue().count("not sending further spans"), 1)
@@ -491,9 +496,11 @@ class SendingTests(TracerTestCase):
             for name in ("a", "b", "c", "d"):
                 with tracer.span(name):
                     pass
-            self.assertEqual(len(tracer._queue), 3)
-            self.assertEqual([item[1] for item in tracer._queue], ["c", "d", "d"])
-            self.assertEqual(tracer._queue_bytes, sum(len(item[0]) for item in tracer._queue))
+            # Eviction takes the oldest ordinary copies first (here, start copies), so the end copies that close
+            # the newest runs survive: b, c and d each keep a complete copy.
+            self.assertEqual(len(queued_copies(tracer)), 3)
+            self.assertEqual([item[1] for item in queued_copies(tracer)], ["b", "c", "d"])
+            self.assertEqual(tracer._queue_bytes, sum(len(item[0]) for item in queued_copies(tracer)))
             self.assertEqual(tracer._processed, 5)
         tracer.flush()
         self.assertEqual(tracer._processed, tracer._enqueued)
@@ -508,7 +515,7 @@ class SendingTests(TracerTestCase):
                 with tracer.span("large-%d" % index, input="x" * 400):
                     pass
             self.assertLessEqual(tracer._queue_bytes, 1500)
-            self.assertLess(len(tracer._queue), 20)
+            self.assertLess(len(queued_copies(tracer)), 20)
         tracer.flush()
         self.assertEqual(tracer._queue_bytes, 0)
         self.assertEqual(tracer._processed, tracer._enqueued)
@@ -519,14 +526,14 @@ class SendingTests(TracerTestCase):
         with patch.object(cloudbyte_tracer, "_MAX_QUEUE_BYTES", 1500), tracer._cond:
             with tracer.span("small"):
                 pass
-            queued = [item[1] for item in tracer._queue]
+            queued = [item[1] for item in queued_copies(tracer)]
             bytes_before = tracer._queue_bytes
             processed_before = tracer._processed
             self.assertEqual(queued, ["small", "small"])
             with tracer.span("huge", input="x" * 5000):
                 pass  # its end copy, with the same input kept, is too big as well
-            self.assertEqual([item[1] for item in tracer._queue], queued)  # the huge span's copies never entered
-            self.assertEqual(tracer._queue_bytes, sum(len(item[0]) for item in tracer._queue))
+            self.assertEqual([item[1] for item in queued_copies(tracer)], queued)  # the huge span's copies never entered
+            self.assertEqual(tracer._queue_bytes, sum(len(item[0]) for item in queued_copies(tracer)))
             self.assertEqual(tracer._processed, processed_before)  # nothing was evicted
             self.assertEqual(tracer._queue_bytes, bytes_before)
         tracer.flush()
@@ -603,6 +610,49 @@ class SendingTests(TracerTestCase):
 
 SERVER_BODY_LIMIT = 5 * 1024 * 1024  # the server answers 413 to a request body larger than 5 MB
 SERVER_FIELD_LIMIT = 64 * 1024  # the server stores at most 64 KB of an input or output and flags the rest
+
+
+class PriorityTests(TracerTestCase):
+    """A root span's end copy closes its run, so it is sent ahead of everything else queued."""
+
+    def test_root_end_is_sent_in_the_first_batch(self):
+        tracer = self.tracer(flush_interval=30, max_batch=100)
+        with tracer._cond:  # the sender cannot take a batch until this lock is released
+            with tracer.span("job", kind="agent"):
+                for index in range(250):
+                    with tracer.span("step-%d" % index, kind="tool"):
+                        pass
+        tracer.flush()
+        first = self.server.requests[0][2]["spans"]
+        self.assertEqual(len(first), 100)
+        self.assertEqual(first[0]["name"], "job")
+        self.assertIsNotNone(first[0]["ended_at"])
+        self.assertEqual(len(self.server.spans()), 252)  # 250 steps, plus the root's start and end copies
+
+    def test_overflow_evicts_children_before_root_end_copies(self):
+        self.allow_stderr = True
+        tracer = self.tracer(flush_interval=30, max_batch=500)
+        with patch.object(cloudbyte_tracer, "_MAX_QUEUE_SPANS", 5), tracer._cond:
+            with tracer.span("job", kind="agent"):
+                for index in range(6):
+                    with tracer.span("step-%d" % index, kind="tool"):
+                        pass
+            # 8 copies for 5 places: the 3 oldest ordinary copies went (the start copy, step-0, step-1).
+            self.assertEqual([item[1] for item in queued_copies(tracer)], ["job", "step-2", "step-3", "step-4", "step-5"])
+            self.assertEqual(tracer._processed, 3)
+        tracer.flush()
+        self.assertIsNotNone(self.server.final("job")["ended_at"])
+
+    def test_root_start_copy_keeps_fifo_order(self):
+        tracer = self.tracer(flush_interval=30, max_batch=500)
+        with tracer._cond:
+            with tracer.span("job", kind="agent"):
+                with tracer.span("child", kind="tool"):
+                    pass
+        tracer.flush()
+        sent = [(span["name"], span["ended_at"] is not None) for span in self.server.spans()]
+        # The end copy jumps the queue; the start copy keeps its place ahead of the child.
+        self.assertEqual(sent, [("job", True), ("job", False), ("child", True)])
 
 
 class OversizeTests(TracerTestCase):

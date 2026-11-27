@@ -43,6 +43,14 @@ _USER_AGENT = "cloudbyte-tracer-python/%s (%s %s)" % (
     SDK_VERSION, platform.python_implementation(), platform.python_version())
 
 
+def _is_root_end(span: dict) -> bool:
+    """The copy that closes a run: a root span (no parent) that has ended. Sent ahead of everything else queued,
+    so a run is marked finished even when a deadline cuts sending short. The server merges copies by span_id and
+    never lets a copy that has not ended change a span that has (it only fills missing fields), so a start copy
+    arriving after its end copy changes nothing."""
+    return span.get("parent_span_id") is None and span.get("ended_at") is not None
+
+
 def _log(message: str) -> None:
     try:
         stream = sys.stderr
@@ -160,7 +168,9 @@ def _retry_after(headers) -> float:
 class Transport:
     """Creates spans and sends them to the server from a background thread.
 
-    Root spans are queued on start and end; children are queued on end only. The sender thread posts the
+    Root spans are queued on start and end; children are queued on end only. A root's end copy, which closes
+    its run, is sent ahead of everything else queued, so runs finish even if a flush deadline drops some steps;
+    the rest go in arrival order. The sender thread posts the
     queue every ``flush_interval`` seconds, or as soon as ``max_batch`` spans (at most 500) are waiting; a batch
     is also cut at about 4 MB, and an input or output over 64 KB is sent cut (the server flags it truncated).
     A 5xx response or a connection error is retried after each of ``retry_delays`` seconds, then the batch
@@ -169,7 +179,8 @@ class Transport:
     instead of the next retry delay, and uses one retry. A 403 (the agent is disabled, or Agent Observability is
     off for the organization) is reported once; the tracer then drops every further span.
     While the sender is blocked, the queue holds at most 10,000 span copies or 8 MB of encoded JSON;
-    older copies are dropped first and one warning is printed. Tracing never waits for queue space.
+    older copies are dropped first (root end copies last) and one warning is printed. Tracing never waits for
+    queue space.
     """
 
     def __init__(self, api_key: str, base_url: str = _DEFAULT_BASE_URL, *, capture_content: bool = True,
@@ -195,7 +206,10 @@ class Transport:
         self._retry_delays = tuple(max(0.0, float(delay)) for delay in retry_delays)
 
         self._current = contextvars.ContextVar("cloudbyte_current_span_%x" % id(self), default=None)
-        self._queue: collections.deque = collections.deque()  # (json text, span name, span id)
+        # Two lanes of (json text, span name, span id, ticket): root end copies, sent first, and everything else in
+        # arrival order. The queue limits below apply to both together; _queue_bytes counts both.
+        self._priority: collections.deque = collections.deque()
+        self._queue: collections.deque = collections.deque()
         self._queue_bytes = 0
         self._overflow_reported = False
         self._cond = threading.Condition()  # guards everything below
@@ -265,8 +279,9 @@ class Transport:
                     _log("span %r is larger than the queue limit; dropping it" % span["name"])
                 return
             dropped = 0
-            while self._queue and (len(self._queue) >= _MAX_QUEUE_SPANS or self._queue_bytes + len(encoded) > _MAX_QUEUE_BYTES):
-                item = self._queue.popleft()
+            while self._queued() and (self._queued() >= _MAX_QUEUE_SPANS or self._queue_bytes + len(encoded) > _MAX_QUEUE_BYTES):
+                # Oldest ordinary copies go first; a root end copy only when nothing else is left to drop.
+                item = (self._queue or self._priority).popleft()
                 self._queue_bytes -= len(item[0])
                 self._pending.discard(item[3])
                 self._processed += 1
@@ -276,32 +291,29 @@ class Transport:
                 _log("queue full; dropping oldest spans to keep tracing memory bounded")
             if dropped:
                 self._cond.notify_all()
-            self._queue.append((encoded, span["name"], span["span_id"], self._enqueued + 1))
+            lane = self._priority if _is_root_end(span) else self._queue
+            lane.append((encoded, span["name"], span["span_id"], self._enqueued + 1))
             self._pending.add(self._enqueued + 1)
             self._queue_bytes += len(encoded)
             self._enqueued += 1
-            if len(self._queue) == 1 or len(self._queue) >= self._max_batch:
+            if self._queued() == 1 or self._queued() >= self._max_batch:
                 self._cond.notify_all()  # wake an idle sender, or one holding a batch open that is now full
 
     def _run(self) -> None:
         while True:
             with self._cond:
                 if self._stop.is_set():
-                    self._processed += len(self._queue)
-                    for item in self._queue:
-                        self._pending.discard(item[3])
-                    self._queue.clear()
-                    self._queue_bytes = 0
+                    self._drop_queued()
                     self._cond.notify_all()
                     return
-                while not self._queue:
+                while not self._queued():
                     if self._stop.is_set():
                         return
                     self._flush_requested = False
                     self._cond.wait()
                 # Hold the batch open for flush_interval, unless it fills up or a flush or shutdown asks for it now.
                 deadline = time.monotonic() + self._flush_interval
-                while len(self._queue) < self._max_batch and not self._flush_requested and not self._stop.is_set():
+                while self._queued() < self._max_batch and not self._flush_requested and not self._stop.is_set():
                     remaining = deadline - time.monotonic()
                     if remaining <= 0:
                         break
@@ -318,16 +330,34 @@ class Transport:
                         self._pending.discard(item[3])
                     self._cond.notify_all()
 
+    def _queued(self) -> int:
+        """Copies waiting in both lanes (call with the lock held)."""
+        return len(self._priority) + len(self._queue)
+
+    def _drop_queued(self) -> None:
+        """Drops every waiting copy, counting them as processed so a flush() waiting on them is released
+        (call with the lock held)."""
+        for lane in (self._priority, self._queue):
+            self._processed += len(lane)
+            for item in lane:
+                self._pending.discard(item[3])
+            lane.clear()
+        self._queue_bytes = 0
+
     def _take_batch(self) -> list:
-        """Pops the next batch off the queue (call with the lock held): at most ``max_batch`` spans, and no more
-        than fit in a request body of _MAX_BODY_BYTES. A span that is too big for that alone is still sent, alone."""
+        """Pops the next batch (call with the lock held): root end copies first, then the rest in arrival order;
+        at most ``max_batch`` spans, and no more than fit in a request body of _MAX_BODY_BYTES. A span that is too
+        big for that alone is still sent, alone."""
         batch = []
         size = len('{"spans":[]}')
-        while self._queue and len(batch) < self._max_batch:
-            size += len(self._queue[0][0]) + 1  # the JSON text is ASCII, so its length is its bytes; 1 for the comma
+        while len(batch) < self._max_batch:
+            lane = self._priority or self._queue
+            if not lane:
+                break
+            size += len(lane[0][0]) + 1  # the JSON text is ASCII, so its length is its bytes; 1 for the comma
             if batch and size > _MAX_BODY_BYTES:
                 break
-            item = self._queue.popleft()
+            item = lane.popleft()
             self._queue_bytes -= len(item[0])
             batch.append(item)
         return batch
@@ -382,11 +412,7 @@ class Transport:
             if self._disabled:
                 return
             self._disabled = True
-            self._processed += len(self._queue)  # dropped, so a flush() waiting on them is released
-            for item in self._queue:
-                self._pending.discard(item[3])
-            self._queue.clear()
-            self._queue_bytes = 0
+            self._drop_queued()
             self._cond.notify_all()
         _log("%s; not sending further spans" % message)
 

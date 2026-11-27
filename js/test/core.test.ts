@@ -176,13 +176,78 @@ test('queue drops oldest with count and byte limits and flushes bounded batches'
     t.transport.maxQueueSpans = 3;
     for (let i = 0; i < 4; i++) t.withSpan('root' + i, {}, () => {});
     await t.flush();
+    // Eviction takes the oldest ordinary copies (here, start copies) first, so the end copies that close
+    // the newest runs survive: root1, root2 and root3 each keep a complete copy.
     assert.equal(s.spans().length, 3);
-    assert.equal(s.spans()[0].name, 'root2');
+    assert.deepEqual(
+      s.spans().map((span) => span.name),
+      ['root1', 'root2', 'root3'],
+    );
     t.transport.maxQueueSpans = 10000;
     t.transport.maxQueueBytes = 1500;
     for (let i = 0; i < 10; i++) t.withSpan('large' + i, { input: 'x'.repeat(400) }, () => {});
     await t.flush();
     assert.ok(s.bodies.at(-1)!.length < 20);
+  } finally {
+    await t.shutdown();
+    await s.close();
+  }
+});
+test('root end copy is sent in the first batch', async () => {
+  const s = await fakeServer(),
+    t = new Tracer({ apiKey: KEY, baseUrl: s.url, flushInterval: 30000 });
+  try {
+    // A large maxBatch while tracing keeps the sender idle, so every copy is queued before the first batch.
+    t.transport.maxBatch = 1000;
+    t.withSpan('job', { kind: 'agent' }, () => {
+      for (let i = 0; i < 250; i++) t.withSpan('step-' + i, { kind: 'tool' }, () => {});
+    });
+    t.transport.maxBatch = 100;
+    await t.flush();
+    assert.equal(s.bodies[0].length, 100);
+    assert.equal(s.bodies[0][0].name, 'job');
+    assert.ok(s.bodies[0][0].ended_at);
+    assert.equal(s.spans().length, 252); // 250 steps, plus the root's start and end copies
+  } finally {
+    await t.shutdown();
+    await s.close();
+  }
+});
+test('overflow evicts children before root end copies', async () => {
+  const s = await fakeServer(),
+    t = new Tracer({ apiKey: KEY, baseUrl: s.url, flushInterval: 30000 });
+  try {
+    t.transport.maxQueueSpans = 5;
+    t.withSpan('job', { kind: 'agent' }, () => {
+      for (let i = 0; i < 6; i++) t.withSpan('step-' + i, { kind: 'tool' }, () => {});
+    });
+    await t.flush();
+    // 8 copies for 5 places: the 3 oldest ordinary copies went (the start copy, step-0, step-1).
+    assert.deepEqual(
+      s.spans().map((span) => span.name),
+      ['job', 'step-2', 'step-3', 'step-4', 'step-5'],
+    );
+    assert.ok(s.spans()[0].ended_at);
+  } finally {
+    await t.shutdown();
+    await s.close();
+  }
+});
+test('root start copy keeps FIFO order', async () => {
+  const s = await fakeServer(),
+    t = new Tracer({ apiKey: KEY, baseUrl: s.url, flushInterval: 30000 });
+  try {
+    t.withSpan('job', { kind: 'agent' }, () => t.withSpan('child', { kind: 'tool' }, () => {}));
+    await t.flush();
+    // The end copy jumps the queue; the start copy keeps its place ahead of the child.
+    assert.deepEqual(
+      s.spans().map((span) => [span.name, Boolean(span.ended_at)]),
+      [
+        ['job', true],
+        ['job', false],
+        ['child', true],
+      ],
+    );
   } finally {
     await t.shutdown();
     await s.close();
