@@ -110,7 +110,8 @@ jobs:
           path: artifacts
       # Stages the release: an npm owner approves it on npmjs.com (Staged Packages) with two-factor login.
       # Provenance is added automatically for a public package published from a public repository.
-      - run: npm stage publish artifacts/*.tgz --access public
+      # The ./ matters: without it npm reads "artifacts/x.tgz" as the GitHub shorthand owner/repo and tries to clone it.
+      - run: npm stage publish ./artifacts/*.tgz --access public
 
   github-release:
     needs: [pypi, npm]
